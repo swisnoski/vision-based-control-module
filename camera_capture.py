@@ -5,9 +5,11 @@ You save frames by simply pressing "q" on your keyboard.
 """
 import cv2
 
-video_id = 6 # this is setup-dependent and would need to change. Ranges from 0-10+
+video_id = 0 # this is setup-dependent and would need to change. Ranges from 0-10+
 cap = cv2.VideoCapture(video_id) 
 i = 0
+
+
 
 while True:
     ret, frame = cap.read()
