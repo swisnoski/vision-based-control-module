@@ -1,9 +1,5 @@
 import numpy as np
-import matplotlib.pyplot as plt
-import math
-from math import pi
 import cv2 as cv
-from scipy import linalg
 from machinevisiontoolbox.base import *
 from machinevisiontoolbox import *
 from spatialmath.base import *
@@ -21,6 +17,7 @@ fpixel_width = K[0, 0]
 fpixel_height = K[1, 1]
 k1, k2, p1, p2, k3 = distortion
 
+
 ### UNDISTORT FUNCTION
 def undistort(frame):
     frame = Image(frame, colororder='BGR')  # Make sure it's interpreted correctly
@@ -37,7 +34,7 @@ def undistort(frame):
     return frame.warp(Ud, Vd)  # Returns an Image object
 
 
-### DRAW AXES FUNCTION
+### DRAW AXES FUNCTION (CHESSBOARD)
 def draw(img, corners, imgpts):
     corner = tuple(corners[0].ravel().astype("int32"))
     imgpts = imgpts.astype("int32")
@@ -65,7 +62,8 @@ def chessboard_corner(frame):
     return img
 
 
-### DRAW RECTANGLE ACURO BOARD
+
+### DRAW RECTANGLE (ACURO BOARD)
 gridshape = (5, 7)
 square_size = 33e-3
 spacing_size = 3.2e-3
@@ -96,7 +94,7 @@ def draw_rectangle(img, pose):
     return img
 
 
-### ARUCO BOARD SETUP + ESTIMATION
+### ARUCO BOARD FRAME ESTIMATION
 objpoint_aruco = np.array([
     [0, 0, 0],
     [0, boardheight, 0],
@@ -128,16 +126,17 @@ def april_tag_board_corner(frame):
     return img # Return numpy image (BGR)
 
 
-### COLOR DETECTION
+### RED BOX COLOR DETECTION
+lower1 = np.array([170, 130, 170])
+upper1 = np.array([179, 255, 255])
+lower2 = np.array([0, 130, 170])
+upper2 = np.array([10, 255, 255])
+kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, (5, 5))
+
 
 def draw_red_boxes(frame, target_rgb=(230, 50, 50)):
     hsv = cv.cvtColor(frame, cv.COLOR_BGR2HSV)
-    lower1 = np.array([170, 130, 170])
-    upper1 = np.array([179, 255, 255])
-    lower2 = np.array([0, 130, 170])
-    upper2 = np.array([10, 255, 255])
     mask = cv.bitwise_or(cv.inRange(hsv, lower1, upper1), cv.inRange(hsv, lower2, upper2))
-    kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, (5, 5))
     mask = cv.morphologyEx(mask, cv.MORPH_OPEN, kernel, iterations=2)
     mask = cv.morphologyEx(mask, cv.MORPH_DILATE, kernel, iterations=1)
     contours, _ = cv.findContours(mask, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
@@ -167,7 +166,6 @@ def draw_red_boxes(frame, target_rgb=(230, 50, 50)):
 
 
 ### CONVERSION FUNCTION
-
 def convert_for_imshow(frame):
     if isinstance(frame, Image):
         arr = np.array(frame.bgr, dtype=np.uint8)
@@ -182,7 +180,6 @@ def convert_for_imshow(frame):
     else:
         raise TypeError("Unsupported frame type. Expected PIL Image or NumPy array.")
     return frame
-
 
 
 ### MAIN LOOP
