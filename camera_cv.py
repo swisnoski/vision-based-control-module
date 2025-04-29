@@ -9,7 +9,7 @@ from time import sleep
 
 ### CALIBRATION
 images = ImageCollection("C:/Users/swisnoski/OneDrive - Olin College of Engineering/2025_01 Spring/FunRobo/Final Project/vision-control-venv/vision-based-control-module/calibration_imgs/*.png")
-K, distortion, frames = CentralCamera.images2C(images, gridshape=(9, 6), squaresize=24e-3)
+K, distortion, frames = CentralCamera.images2C(images, gridshape=(9, 6), squaresize=30e-3)
 
 u0 = K[0, 2]
 v0 = K[1, 2]
@@ -38,9 +38,9 @@ def undistort(frame):
 def draw(img, corners, imgpts):
     corner = tuple(corners[0].ravel().astype("int32"))
     imgpts = imgpts.astype("int32")
-    img = cv.line(img, corner, tuple(imgpts[0].ravel()), (255,0,0), 5)
-    img = cv.line(img, corner, tuple(imgpts[1].ravel()), (0,255,0), 5)
-    img = cv.line(img, corner, tuple(imgpts[2].ravel()), (0,0,255), 5)
+    img = cv.line(img, corner, tuple(imgpts[0].ravel()), (255,0,0), 2)
+    img = cv.line(img, corner, tuple(imgpts[1].ravel()), (0,255,0), 2)
+    img = cv.line(img, corner, tuple(imgpts[2].ravel()), (0,0,255), 2)
     return img
 
 
@@ -65,7 +65,7 @@ def chessboard_corner(frame):
 
 ### DRAW RECTANGLE (ACURO BOARD)
 gridshape = (5, 7)
-square_size = 33e-3
+square_size = 32e-3
 spacing_size = 3.2e-3
 boardheight = (gridshape[1]*square_size + (gridshape[1]-1)*spacing_size)
 boardwidth = (gridshape[0]*square_size + (gridshape[0]-1)*spacing_size)
@@ -89,7 +89,7 @@ def draw_rectangle(img, pose):
     board_contour = imgpts.reshape(-1, 1, 2)
 
     # Draw rectangle on the image
-    img = cv.polylines(img.image, [imgpts], isClosed=True, color=(0, 255, 255), thickness=4)
+    img = cv.polylines(img.image, [imgpts], isClosed=True, color=(0, 255, 255), thickness=2)
 
     return img
 
@@ -111,14 +111,14 @@ def april_tag_board_corner(frame):
     img = Image(frame, colororder='BGR')  # MVTB expects BGR
     global index
     try:
-        pose_found = board.estimatePose(img, camera)
+        pose_found = board.estimatePose(frame1, camera)
         if pose_found:
             pose = pose_found[0]
-            board.draw(img, camera, length=0.05, thick=4)
+            board.draw(img, camera, length=0.05, thick=8)
             img = draw_rectangle(img, pose)
             
             if index == 10:
-                print("Pose of Board:\n", pose_found[0])
+                # print("Pose of Board:\n", pose_found[0])
                 index = 0
             index+=1 
     except:
@@ -127,12 +127,12 @@ def april_tag_board_corner(frame):
 
 
 ### RED BOX COLOR DETECTION
-lower1 = np.array([170, 130, 170])
-upper1 = np.array([179, 255, 255])
-lower2 = np.array([0, 130, 170])
-upper2 = np.array([10, 255, 255])
+lower1 = np.array([160, 120, 120])
+upper1 = np.array([189, 255, 255])
+lower2 = np.array([0, 120, 160])
+upper2 = np.array([20, 255, 255])
 kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, (5, 5))
-
+red_positions = np.empty(shape=[0, 2])
 
 def draw_red_boxes(frame, target_rgb=(230, 50, 50)):
     hsv = cv.cvtColor(frame, cv.COLOR_BGR2HSV)
@@ -142,6 +142,8 @@ def draw_red_boxes(frame, target_rgb=(230, 50, 50)):
     contours, _ = cv.findContours(mask, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
     target_bgr = np.array(target_rgb[::-1], dtype=np.float32)
     out = frame.copy()
+    red_index = 0
+    red_positions = np.empty(shape=[0, 2])
     for cnt in contours:
         if cv.contourArea(cnt) < 500:
             continue
@@ -152,17 +154,113 @@ def draw_red_boxes(frame, target_rgb=(230, 50, 50)):
         dist = np.linalg.norm(mean_bgr - target_bgr)
         if dist < 60:
             # Check if all points of the contour are inside the board_contour
-            inside = True
+            inside = False
             for point in cnt:
                 pt = tuple(int(x) for x in point[0])
-                result = cv.pointPolygonTest(board_contour, pt, False)
-                if result <= 0:
-                    inside = False
-                    break
+                if board_contour is not None:
+                    result = cv.pointPolygonTest(board_contour, pt, True)
+                    if result >= 0:
+                        inside = True
+                        break
             if inside:
                 x, y, w, h = cv.boundingRect(cnt)
-                cv.rectangle(out, (x, y), (x + w, y + h), (0, 0, 255), 2)
+                red_positions = np.append(red_positions, [[x + w/2, y + h/2]], axis=0)
+                out = calc_object_positions(Image(out, colororder='BGR'), red_positions)
+                red_index += 1
+                # cv.rectangle(out, (x, y), (x + w, y + h), (0, 0, 255), 2)
+            
     return out
+
+
+### CONVERT IMAGE FRAME TO BOARD FRAME 
+
+def pixels_to_board(u, v, pose):
+    # Invert camera intrinsics
+    Kinv = np.linalg.inv(K)
+    uv1 = np.array([u, v, 1.0]).reshape(3, 1)
+    ray_cam = Kinv @ uv1  # Ray in camera coordinates
+
+    # Convert board pose to rotation and translation
+    R = pose.R
+    t = pose.t.reshape(3, 1)
+
+    # Transform ray into board coordinate frame
+    ray_world = R.T @ (ray_cam - t)
+    return ray_world
+
+
+def pixel_to_board_xy(u, v, pose, board_z=-0.02):
+    # Invert camera intrinsics
+    Kinv = np.linalg.inv(K)
+    uv1 = np.array([u, v, 1]).reshape(3, 1)
+    ray_cam = Kinv @ uv1  # Ray in camera coordinates
+
+    # Extract board rotation and translation
+    R = pose.R
+    t = pose.t.reshape(3, 1)
+
+    # Transform to board coordinates
+    ray_board = R.T @ (ray_cam - t)
+    cam_pos_board = -R.T @ t
+
+    # Intersect ray with Z = height_above_board plane
+    z_offset = board_z
+    if ray_board[2, 0] == 0:
+        raise ValueError("Ray is parallel to board Z plane")
+
+    lamda = (z_offset - cam_pos_board[2, 0]) / ray_board[2, 0]
+    point_board = cam_pos_board + lamda * ray_board
+
+    print(float(point_board[0, 0])*100, float(point_board[1, 0])*100, board_z*100)
+
+
+
+### DRAW AXIS
+def draw_position_axis(img, postion, imgpts):
+    center = tuple(postion.ravel().astype("int32"))
+    imgpts = imgpts.astype("int32")
+    img = cv.line(img, center, tuple(imgpts[0].ravel()), (0,0,255), 3)
+    img = cv.line(img, center, tuple(imgpts[1].ravel()), (0,255,0), 3)
+    img = cv.line(img, center, tuple(imgpts[2].ravel()), (255,0,0), 3)
+    return img      
+
+
+
+### RED BOX POSITION FINDER 
+
+R_predefined = np.array([
+    [1,  0,  0],   # X right
+    [0,  1,  0],   # Y forward
+    [0,  0, 1],   # Z down
+], dtype=np.float32)
+
+def calc_object_positions(frame, positions):
+    img = np.array(frame.bgr, dtype=np.uint8)
+    try:
+        pose_found = board.estimatePose(frame1, camera)
+        if pose_found:
+            pose = pose_found[0]
+            R = pose.R  # 3x3 rotation matrix
+            T = pose.t
+            tvec = T.reshape(3,1)
+            rvec, _ = cv.Rodrigues(R)
+            for position in positions:
+                u, v = position
+                pixel_to_board_xy(u, v, pose)
+                position_board = pixels_to_board(u, v, pose)
+                obj_axis = np.float32([
+                    position_board.flatten(),
+                    (position_board + R_predefined @ np.array([[0.1], [0], [0]])).flatten(),
+                    (position_board + R_predefined @ np.array([[0], [0.1], [0]])).flatten(),
+                    (position_board + R_predefined @ np.array([[0], [0], [0.1]])).flatten()
+                ])
+                imgpts, _ = cv.projectPoints(obj_axis[1:], rvec, tvec, K, zero_dist)
+                img = draw_position_axis(img, np.array([[u, v]]), imgpts)
+    except:
+        return img
+    return img
+            
+
 
 
 ### CONVERSION FUNCTION
@@ -179,6 +277,7 @@ def convert_for_imshow(frame):
 
     else:
         raise TypeError("Unsupported frame type. Expected PIL Image or NumPy array.")
+        
     return frame
 
 
@@ -188,20 +287,22 @@ cap = cv.VideoCapture(video_id)
 
 while True:
     ret, frame0 = cap.read()
+
+    
     if ret:
         frame1 = undistort(frame0) # Undistort
         frame2 = april_tag_board_corner(frame1) # Draw ArUco board
         frame3 = convert_for_imshow(frame2)
         frame4 = draw_red_boxes(frame3)
-        # final_frame = chessboard_corner(Image(aruco_frame, colororder='BGR'))
+        #frame5 = chessboard_corner(Image(frame4, colororder='BGR'))
 
     else:
         print("Failed to capture frame")
         break
 
     # Show
-    frame5 = convert_for_imshow(frame4)
-    cv.imshow("RED CUBE DETECTOR", frame5)
+    frame6 = convert_for_imshow(frame4)
+    cv.imshow("RED CUBE DETECTOR", frame6)
     cv.waitKey(1)
 
 cap.release()
