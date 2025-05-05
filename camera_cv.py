@@ -355,9 +355,28 @@ def cv_main(ret, frame0):
         frame1 = undistort(frame0) # Undistort
         frame2 = april_tag_board_corner(frame1) # Draw ArUco board
         frame3 = convert_for_imshow(frame2)
-        _, ee_position = draw_red_boxes(frame3)
-        #frame5 = chessboard_corner(Image(frame4, colororder='BGR'))
+        frame4, ee_position = draw_red_boxes(frame3)
         
         if ee_position is not None:
             return ee_position
     return None
+
+
+video_id = 0
+cap = cv.VideoCapture(video_id)
+ee_position = None
+
+
+def get_coordinates():
+    index = 0
+    while True:
+        ret, frame = cap.read()
+        ee_position = cv_main(ret, frame)
+        if ee_position is not None:
+            index += 1
+            sleep(1)
+            if index > 5:
+                x, y, z = ee_position
+                x = -(x-0.01)
+                y = -y
+                return [x,y,z]
